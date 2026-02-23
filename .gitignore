@@ -1,0 +1,14 @@
+# Build artifacts
+*.egg-info/
+__pycache__/
+.pytest_cache/
+dist/
+build/
+
+# Generated text renders
+MOADT-complete.txt
+MOADT-complete-latest.txt
+
+# OS
+.DS_Store
+Thumbs.db
