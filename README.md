@@ -65,11 +65,13 @@ python3 -m pytest tests/ -q
 
 ```
 ├── paper/                    # All paper source files
+│   ├── the-scalarization-trap.md   # Motivation (~25 pages)
 │   ├── MOADT-core.md         # Compact argument (~8 pages)
 │   ├── R-MOADT.md            # Full technical report
-│   ├── R-MOADT-lesswrong.md  # LessWrong-formatted version
 │   ├── MOADT-worked-example-{1..9}.md
-│   └── build-pdf.sh          # PDF build script
+│   ├── build-pdf.sh          # PDF build script
+│   ├── MOADT-core.pdf        # Built PDF
+│   └── MOADT-complete.pdf    # Built PDF (report + appendices)
 │
 ├── moadt/                    # Python library
 │   ├── _engine.py
@@ -82,21 +84,6 @@ python3 -m pytest tests/ -q
 │
 ├── tests/                    # Regression tests
 │   └── test_engine.py
-│
-├── critiques/                # Simulated review process
-│   ├── 01–07 (round 1)      # 7 reviewer personas
-│   ├── round2/               # Second pass
-│   ├── round3/               # Third pass
-│   └── round4/               # Fourth pass
-│
-├── experiments/              # Original prototyping scripts
-│   ├── moadt_engine.py       # Pre-library engine (historical)
-│   └── ...                   # Early experiments and plots
-│
-├── archive/                  # Earlier drafts and reference material
-│   ├── PARETO-ALIGNMENT.md   # Predecessor essay
-│   ├── DESIGN.md             # Original design document
-│   └── ...
 │
 └── pyproject.toml            # Package configuration
 ```
