@@ -15,7 +15,8 @@ trap 'rm -f "$COMBINED"' EXIT
 cat > "$COMBINED" << 'YAML'
 ---
 title: "MOADT: Multi-Objective Admissible Decision Theory"
-subtitle: "A formal companion to *The Scalarization Trap*"
+subtitle: "A formal decision theory for AI alignment"
+author: "C. Matt Freeman, Ph.D. — mattf@globalmoo.com"
 date: "2025"
 documentclass: report
 classoption:
@@ -42,9 +43,9 @@ header-includes:
 ---
 YAML
 
-# --- Main body: R-MOADT.md (skip the # title and subtitle lines) ---
-# Skip line 1 (# MOADT...), line 2 (blank), line 3 (*subtitle*), line 4 (blank), line 5 (---)
-tail -n +6 R-MOADT.md >> "$COMBINED"
+# --- Main body: R-MOADT.md (skip header lines handled by YAML metadata) ---
+# Skip lines 1-9: title, author, email, subtitle, separator
+tail -n +10 R-MOADT.md >> "$COMBINED"
 
 # --- Switch to appendix lettering ---
 cat >> "$COMBINED" << 'TEX'
