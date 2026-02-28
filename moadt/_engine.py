@@ -15,8 +15,9 @@ This module provides concrete implementations of:
 Used by the worked-example papers to produce verifiable numerical results.
 """
 
+from __future__ import annotations
+
 import numpy as np
-from typing import List, Tuple, Dict, Optional, Union
 from dataclasses import dataclass
 
 
@@ -38,28 +39,28 @@ class MOADTProblem:
             When *None*, all-ones is used.
     """
 
-    actions: List[str]                          # Action labels
-    states: List[str]                           # State labels
-    objectives: List[str]                       # Objective labels
-    outcomes: Dict[Tuple[str, str], np.ndarray] # (action, state) -> outcome vector per evaluator
+    actions: list[str]                          # Action labels
+    states: list[str]                           # State labels
+    objectives: list[str]                       # Objective labels
+    outcomes: dict[tuple[str, str], np.ndarray] # (action, state) -> outcome vector per evaluator
     # outcomes[(a, s)] shape: (|F|, k) -- one row per evaluator
-    credal_probs: List[np.ndarray]              # List of probability vectors over states
-    constraints: Dict[int, float]               # objective_index -> threshold (Layer 1)
+    credal_probs: list[np.ndarray]              # List of probability vectors over states
+    constraints: dict[int, float]               # objective_index -> threshold (Layer 1)
     reference_point: np.ndarray                 # Aspiration levels (Layer 2)
-    sigma: Optional[np.ndarray] = None          # Normalization factors for ASF
+    sigma: np.ndarray | None = None             # Normalization factors for ASF
 
     @classmethod
     def from_arrays(
         cls,
         outcomes_array: np.ndarray,
-        actions: List[str],
-        states: List[str],
-        objectives: List[str],
-        credal_probs: List[np.ndarray],
-        constraints: Union[Dict[int, float], Dict[str, float]],
+        actions: list[str],
+        states: list[str],
+        objectives: list[str],
+        credal_probs: list[np.ndarray],
+        constraints: dict[int, float] | dict[str, float],
         reference_point: np.ndarray,
-        sigma: Optional[np.ndarray] = None,
-    ) -> "MOADTProblem":
+        sigma: np.ndarray | None = None,
+    ) -> MOADTProblem:
         """Construct a problem from a 4-D outcome array.
 
         This convenience constructor eliminates the need to manually build the
@@ -107,7 +108,7 @@ class MOADTProblem:
             )
 
         # Build outcomes dict; squeeze evaluator axis when n_evaluators == 1
-        outcomes: Dict[Tuple[str, str], np.ndarray] = {}
+        outcomes: dict[tuple[str, str], np.ndarray] = {}
         for i, a in enumerate(actions):
             for j, s in enumerate(states):
                 val = arr[i, j]            # (n_evaluators, n_objectives)
@@ -116,7 +117,7 @@ class MOADTProblem:
                 outcomes[(a, s)] = val
 
         # Resolve string constraint keys to integer indices
-        idx_constraints: Dict[int, float] = {}
+        idx_constraints: dict[int, float] = {}
         obj_index = {name: idx for idx, name in enumerate(objectives)}
         for key, threshold in constraints.items():
             if isinstance(key, str):
@@ -231,21 +232,21 @@ class MOADTResult:
         layer_trace: Human-readable log of each protocol layer.
     """
 
-    outcome_sets: Dict[str, np.ndarray]         # action -> Y(a) matrix (rows = vectors)
-    admissible_set: List[str]                   # Adm(A)
-    constraint_set: List[str]                   # C
-    feasible_set: List[str]                     # F = Adm(C)
-    satisficing_set: List[str]                  # Sat(F, r)
+    outcome_sets: dict[str, np.ndarray]         # action -> Y(a) matrix (rows = vectors)
+    admissible_set: list[str]                   # Adm(A)
+    constraint_set: list[str]                   # C
+    feasible_set: list[str]                     # F = Adm(C)
+    satisficing_set: list[str]                  # Sat(F, r)
     sat_fallback_used: bool                     # Whether ASF fallback was needed
-    asf_selection: Optional[List[str]]          # ASF selection if fallback used
-    regret_vectors: Dict[str, np.ndarray]       # action -> regret vector
-    regret_pareto_set: List[str]                # R
+    asf_selection: list[str] | None             # ASF selection if fallback used
+    regret_vectors: dict[str, np.ndarray]       # action -> regret vector
+    regret_pareto_set: list[str]                # R
     deference_needed: bool                      # Whether |R| > 1
-    robust_dominance_pairs: List[Tuple[str, str]]  # (a, b) where a >_R b
-    layer_trace: List[str]                      # Human-readable trace of protocol
+    robust_dominance_pairs: list[tuple[str, str]]  # (a, b) where a >_R b
+    layer_trace: list[str]                      # Human-readable trace of protocol
 
 
-def compute_outcome_sets(problem: MOADTProblem) -> Dict[str, np.ndarray]:
+def compute_outcome_sets(problem: MOADTProblem) -> dict[str, np.ndarray]:
     """Compute the outcome set Y(a) for every action.
 
     Y(a) = { E_P[f(omega(a, s))] : P in P, f in F }
@@ -299,9 +300,9 @@ def robustly_dominates(Y_a: np.ndarray, Y_b: np.ndarray) -> bool:
 
 
 def compute_admissible_set(
-    actions: List[str],
-    outcome_sets: Dict[str, np.ndarray]
-) -> Tuple[List[str], List[Tuple[str, str]]]:
+    actions: list[str],
+    outcome_sets: dict[str, np.ndarray]
+) -> tuple[list[str], list[tuple[str, str]]]:
     """Compute Adm(actions) = {a : no a' robustly dominates a}.
 
     Returns:
@@ -350,10 +351,10 @@ def check_constraint_satisfaction(
 
 
 def compute_satisficing_set(
-    feasible: List[str],
-    outcome_sets: Dict[str, np.ndarray],
+    feasible: list[str],
+    outcome_sets: dict[str, np.ndarray],
     reference_point: np.ndarray
-) -> List[str]:
+) -> list[str]:
     """Compute Sat(F, r) = {a in F : every y in Y(a) >= r}.
 
     An action robustly satisfices when it meets aspirations under *all*
@@ -368,9 +369,9 @@ def compute_satisficing_set(
 
 def compute_asf(
     action: str,
-    outcome_sets: Dict[str, np.ndarray],
+    outcome_sets: dict[str, np.ndarray],
     reference_point: np.ndarray,
-    sigma: Optional[np.ndarray] = None
+    sigma: np.ndarray | None = None
 ) -> float:
     """Achievement scalarising function (Layer 2 fallback).
 
@@ -390,11 +391,11 @@ def compute_asf(
 
 
 def compute_regret_vectors(
-    actions: List[str],
-    outcome_sets: Dict[str, np.ndarray],
+    actions: list[str],
+    outcome_sets: dict[str, np.ndarray],
     problem: MOADTProblem,
-    reference_actions: Optional[List[str]] = None,
-) -> Dict[str, np.ndarray]:
+    reference_actions: list[str] | None = None,
+) -> dict[str, np.ndarray]:
     """Compute per-objective minimax regret vectors.
 
     ``rho_i(a) = max_{P,f} [ max_{a' in ref} E_P[f_i(a')] - E_P[f_i(a)] ]``
@@ -447,9 +448,9 @@ def compute_regret_vectors(
 
 
 def compute_regret_pareto_set(
-    actions: List[str],
-    regret_vectors: Dict[str, np.ndarray]
-) -> List[str]:
+    actions: list[str],
+    regret_vectors: dict[str, np.ndarray]
+) -> list[str]:
     """Compute the regret-Pareto set (actions with Pareto-minimal regret).
 
     An action is regret-dominated if another action has weakly lower regret
@@ -602,8 +603,8 @@ def scalar_eu_analysis(
     weights: np.ndarray,
     prior_idx: int = 0,
     evaluator_idx: int = 0,
-    outcome_sets: Optional[Dict[str, np.ndarray]] = None,
-) -> Dict[str, float]:
+    outcome_sets: dict[str, np.ndarray] | None = None,
+) -> dict[str, float]:
     """Compute scalar expected utility for comparison.
 
     ``U(a) = w . E_P[f(omega(a, s))]`` under a fixed weight vector,
