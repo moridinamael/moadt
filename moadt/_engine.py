@@ -194,16 +194,16 @@ def robustly_dominates(Y_a: np.ndarray, Y_b: np.ndarray) -> bool:
 
     a >_R b iff for every y_b in Y(b) there exists y_a in Y(a) such that
     y_a Pareto-dominates y_b.
+
+    Uses numpy broadcasting to compute the full (n, m) dominance matrix
+    in a single vectorized operation instead of nested Python loops.
     """
-    for y_b in Y_b:
-        found_dominator = False
-        for y_a in Y_a:
-            if pareto_dominates(y_a, y_b):
-                found_dominator = True
-                break
-        if not found_dominator:
-            return False
-    return True
+    # Y_a: (n, k), Y_b: (m, k) -> broadcast to (n, m, k)
+    diff = Y_a[:, np.newaxis, :] - Y_b[np.newaxis, :, :]
+    # dom[i, j] = True iff y_a[i] Pareto-dominates y_b[j]
+    dom = np.all(diff >= 0, axis=2) & np.any(diff > 0, axis=2)
+    # For every y_b (column), at least one y_a (row) must dominate it
+    return bool(np.all(np.any(dom, axis=0)))
 
 
 def compute_admissible_set(
