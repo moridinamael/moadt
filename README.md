@@ -33,17 +33,27 @@ pip install -e .
 ```
 
 ```python
+import numpy as np
 from moadt import MOADTProblem, run_moadt_protocol
 
 problem = MOADTProblem(
     actions=["a", "b", "c"],
     states=["s1", "s2"],
     objectives=["safety", "helpfulness", "honesty"],
-    probabilities=[...],    # credal set
-    evaluators=[...],       # evaluator set
-    outcomes={...},         # action × state → outcome
-    constraints={...},      # Layer 1 thresholds
-    reference_point=[...],  # Layer 2 aspirations
+    credal_probs=[                          # credal set over states
+        np.array([0.5, 0.5]),
+        np.array([0.3, 0.7]),
+    ],
+    outcomes={                              # (action, state) → objective scores
+        ("a", "s1"): np.array([0.9, 0.6, 0.7]),
+        ("a", "s2"): np.array([0.8, 0.5, 0.6]),
+        ("b", "s1"): np.array([0.4, 0.9, 0.8]),
+        ("b", "s2"): np.array([0.3, 0.8, 0.9]),
+        ("c", "s1"): np.array([0.7, 0.7, 0.5]),
+        ("c", "s2"): np.array([0.6, 0.6, 0.4]),
+    },
+    constraints={0: 0.3},                   # safety (index 0) >= 0.3
+    reference_point=np.array([0.5, 0.5, 0.5]),  # Layer 2 aspirations
 )
 result = run_moadt_protocol(problem)
 ```
