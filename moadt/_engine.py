@@ -16,7 +16,7 @@ Used by the worked-example papers to produce verifiable numerical results.
 """
 
 import numpy as np
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Union
 from dataclasses import dataclass
 
 
@@ -47,6 +47,98 @@ class MOADTProblem:
     constraints: Dict[int, float]               # objective_index -> threshold (Layer 1)
     reference_point: np.ndarray                 # Aspiration levels (Layer 2)
     sigma: Optional[np.ndarray] = None          # Normalization factors for ASF
+
+    @classmethod
+    def from_arrays(
+        cls,
+        outcomes_array: np.ndarray,
+        actions: List[str],
+        states: List[str],
+        objectives: List[str],
+        credal_probs: List[np.ndarray],
+        constraints: Union[Dict[int, float], Dict[str, float]],
+        reference_point: np.ndarray,
+        sigma: Optional[np.ndarray] = None,
+    ) -> "MOADTProblem":
+        """Construct a problem from a 4-D outcome array.
+
+        This convenience constructor eliminates the need to manually build the
+        ``(action, state)``-keyed outcomes dict.
+
+        Args:
+            outcomes_array: Array of shape
+                ``(n_actions, n_states, n_evaluators, n_objectives)``.
+            actions: Action labels (length must match axis 0).
+            states: State labels (length must match axis 1).
+            objectives: Objective labels (length must match axis 3).
+            credal_probs: List of probability vectors over states.
+            constraints: Hard thresholds for Layer 1.  Keys may be
+                objective *names* (str) or integer indices.
+            reference_point: Aspiration levels for satisficing (Layer 2).
+            sigma: Optional normalisation factors for the ASF fallback.
+
+        Returns:
+            A fully constructed :class:`MOADTProblem`.
+
+        Raises:
+            ValueError: If array dimensions don't match label lengths or
+                constraint names are not found among objectives.
+        """
+        arr = np.asarray(outcomes_array, dtype=float)
+        if arr.ndim != 4:
+            raise ValueError(
+                f"outcomes_array must be 4-D "
+                f"(n_actions, n_states, n_evaluators, n_objectives), "
+                f"got {arr.ndim}-D"
+            )
+
+        n_a, n_s, n_f, n_k = arr.shape
+        if len(actions) != n_a:
+            raise ValueError(
+                f"len(actions)={len(actions)} != outcomes_array axis 0 ({n_a})"
+            )
+        if len(states) != n_s:
+            raise ValueError(
+                f"len(states)={len(states)} != outcomes_array axis 1 ({n_s})"
+            )
+        if len(objectives) != n_k:
+            raise ValueError(
+                f"len(objectives)={len(objectives)} != outcomes_array axis 3 ({n_k})"
+            )
+
+        # Build outcomes dict; squeeze evaluator axis when n_evaluators == 1
+        outcomes: Dict[Tuple[str, str], np.ndarray] = {}
+        for i, a in enumerate(actions):
+            for j, s in enumerate(states):
+                val = arr[i, j]            # (n_evaluators, n_objectives)
+                if n_f == 1:
+                    val = val[0]           # squeeze to (n_objectives,)
+                outcomes[(a, s)] = val
+
+        # Resolve string constraint keys to integer indices
+        idx_constraints: Dict[int, float] = {}
+        obj_index = {name: idx for idx, name in enumerate(objectives)}
+        for key, threshold in constraints.items():
+            if isinstance(key, str):
+                if key not in obj_index:
+                    raise ValueError(
+                        f"constraint key {key!r} not found in objectives "
+                        f"{objectives}"
+                    )
+                idx_constraints[obj_index[key]] = threshold
+            else:
+                idx_constraints[key] = threshold
+
+        return cls(
+            actions=list(actions),
+            states=list(states),
+            objectives=list(objectives),
+            outcomes=outcomes,
+            credal_probs=credal_probs,
+            constraints=idx_constraints,
+            reference_point=np.asarray(reference_point),
+            sigma=sigma,
+        )
 
     @property
     def n_evaluators(self) -> int:

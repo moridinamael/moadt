@@ -503,3 +503,152 @@ class TestEmptyConstraintSetDeference:
         r = run_moadt_protocol(p)
         assert r.constraint_set == []
         assert r.deference_needed is True
+
+
+# ---------------------------------------------------------------------------
+# TestFromArrays — convenience constructor
+# ---------------------------------------------------------------------------
+
+class TestFromArrays:
+    """Tests for MOADTProblem.from_arrays() convenience constructor."""
+
+    def test_single_evaluator_roundtrip(self):
+        """from_arrays with 1 evaluator matches manual construction."""
+        manual = _simple_problem()
+
+        arr = np.array([
+            [  # action "a"
+                [[0.8, 0.4]],  # state "s1", 1 evaluator
+                [[0.6, 0.5]],  # state "s2"
+            ],
+            [  # action "b"
+                [[0.5, 0.7]],
+                [[0.4, 0.8]],
+            ],
+        ])  # shape (2, 2, 1, 2)
+
+        from_arr = MOADTProblem.from_arrays(
+            outcomes_array=arr,
+            actions=["a", "b"],
+            states=["s1", "s2"],
+            objectives=["o1", "o2"],
+            credal_probs=[np.array([0.5, 0.5])],
+            constraints={},
+            reference_point=np.array([0.3, 0.3]),
+        )
+
+        # Outcomes should be squeezed to 1-D for single evaluator
+        assert from_arr.outcomes[("a", "s1")].shape == (2,)
+        assert from_arr.n_evaluators == 1
+
+        # Protocol results must match
+        r_manual = run_moadt_protocol(manual)
+        r_arr = run_moadt_protocol(from_arr)
+        assert r_manual.admissible_set == r_arr.admissible_set
+        assert r_manual.regret_pareto_set == r_arr.regret_pareto_set
+
+    def test_multi_evaluator_roundtrip(self):
+        """from_arrays with 2 evaluators matches manual construction."""
+        outcomes_manual = {
+            ("a", "s1"): np.array([[0.8, 0.4], [0.7, 0.3]]),
+            ("a", "s2"): np.array([[0.6, 0.5], [0.5, 0.4]]),
+            ("b", "s1"): np.array([[0.5, 0.7], [0.4, 0.6]]),
+            ("b", "s2"): np.array([[0.4, 0.8], [0.3, 0.7]]),
+        }
+        manual = _simple_problem(outcomes=outcomes_manual)
+
+        arr = np.array([
+            [[[0.8, 0.4], [0.7, 0.3]],
+             [[0.6, 0.5], [0.5, 0.4]]],
+            [[[0.5, 0.7], [0.4, 0.6]],
+             [[0.4, 0.8], [0.3, 0.7]]],
+        ])  # shape (2, 2, 2, 2)
+
+        from_arr = MOADTProblem.from_arrays(
+            outcomes_array=arr,
+            actions=["a", "b"],
+            states=["s1", "s2"],
+            objectives=["o1", "o2"],
+            credal_probs=[np.array([0.5, 0.5])],
+            constraints={},
+            reference_point=np.array([0.3, 0.3]),
+        )
+
+        assert from_arr.n_evaluators == 2
+        r_manual = run_moadt_protocol(manual)
+        r_arr = run_moadt_protocol(from_arr)
+        assert r_manual.admissible_set == r_arr.admissible_set
+        assert r_manual.regret_pareto_set == r_arr.regret_pareto_set
+
+    def test_string_constraints(self):
+        """Constraints keyed by objective name are resolved to indices."""
+        arr = np.array([
+            [[[0.8, 0.4]], [[0.6, 0.5]]],
+            [[[0.5, 0.7]], [[0.4, 0.8]]],
+        ])
+
+        p = MOADTProblem.from_arrays(
+            outcomes_array=arr,
+            actions=["a", "b"],
+            states=["s1", "s2"],
+            objectives=["o1", "o2"],
+            constraints={"o2": 0.5},
+            credal_probs=[np.array([0.5, 0.5])],
+            reference_point=np.array([0.3, 0.3]),
+        )
+        assert p.constraints == {1: 0.5}
+
+    def test_mixed_constraints(self):
+        """Both int and str constraint keys work together."""
+        arr = np.array([
+            [[[0.8, 0.4, 0.6]], [[0.6, 0.5, 0.7]]],
+            [[[0.5, 0.7, 0.3]], [[0.4, 0.8, 0.4]]],
+        ])
+
+        p = MOADTProblem.from_arrays(
+            outcomes_array=arr,
+            actions=["a", "b"],
+            states=["s1", "s2"],
+            objectives=["o1", "o2", "o3"],
+            constraints={0: 0.3, "o3": 0.5},
+            credal_probs=[np.array([0.5, 0.5])],
+            reference_point=np.array([0.3, 0.3, 0.3]),
+        )
+        assert p.constraints == {0: 0.3, 2: 0.5}
+
+    def test_bad_ndim_raises(self):
+        """3-D array should be rejected."""
+        with pytest.raises(ValueError, match="4-D"):
+            MOADTProblem.from_arrays(
+                outcomes_array=np.zeros((2, 2, 2)),
+                actions=["a", "b"],
+                states=["s1", "s2"],
+                objectives=["o1", "o2"],
+                credal_probs=[np.array([0.5, 0.5])],
+                constraints={},
+                reference_point=np.array([0.3, 0.3]),
+            )
+
+    def test_bad_action_length_raises(self):
+        with pytest.raises(ValueError, match="actions"):
+            MOADTProblem.from_arrays(
+                outcomes_array=np.zeros((2, 2, 1, 2)),
+                actions=["a"],  # wrong length
+                states=["s1", "s2"],
+                objectives=["o1", "o2"],
+                credal_probs=[np.array([0.5, 0.5])],
+                constraints={},
+                reference_point=np.array([0.3, 0.3]),
+            )
+
+    def test_unknown_constraint_name_raises(self):
+        with pytest.raises(ValueError, match="not found in objectives"):
+            MOADTProblem.from_arrays(
+                outcomes_array=np.zeros((2, 2, 1, 2)),
+                actions=["a", "b"],
+                states=["s1", "s2"],
+                objectives=["o1", "o2"],
+                credal_probs=[np.array([0.5, 0.5])],
+                constraints={"nonexistent": 0.5},
+                reference_point=np.array([0.3, 0.3]),
+            )
