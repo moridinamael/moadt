@@ -13,6 +13,7 @@ from moadt import (
     compute_satisficing_set,
     compute_asf,
     compute_regret_vectors,
+    compute_regret_pareto_set,
     run_moadt_protocol,
     scalar_eu_analysis,
 )
@@ -58,6 +59,232 @@ class TestParetoDominates:
 
     def test_incomparable(self):
         assert not pareto_dominates(np.array([2.0, 1.0]), np.array([1.0, 2.0]))
+
+
+# ---------------------------------------------------------------------------
+# TestRobustlyDominates
+# ---------------------------------------------------------------------------
+
+class TestRobustlyDominates:
+    def test_clear_dominance(self):
+        """Y_a strictly dominates every vector in Y_b."""
+        Y_a = np.array([[3.0, 3.0], [4.0, 4.0]])
+        Y_b = np.array([[1.0, 1.0], [2.0, 2.0]])
+        assert robustly_dominates(Y_a, Y_b) is True
+
+    def test_single_element_sets(self):
+        """Each set has a single vector; dominance is simple Pareto check."""
+        Y_a = np.array([[3.0, 3.0]])
+        Y_b = np.array([[2.0, 2.0]])
+        assert robustly_dominates(Y_a, Y_b) is True
+        # Reverse should fail
+        assert robustly_dominates(Y_b, Y_a) is False
+
+    def test_one_uncovered_vector_blocks_dominance(self):
+        """Y_a covers one vector in Y_b but not the other — should return False."""
+        Y_a = np.array([[3.0, 1.0]])  # dominates (2,0) but NOT (1,3)
+        Y_b = np.array([[2.0, 0.0], [1.0, 3.0]])
+        assert robustly_dominates(Y_a, Y_b) is False
+
+    def test_equal_sets_no_dominance(self):
+        """Identical outcome sets — Pareto requires strict somewhere, so no dominance."""
+        Y = np.array([[1.0, 2.0], [3.0, 4.0]])
+        assert robustly_dominates(Y, Y) is False
+
+
+# ---------------------------------------------------------------------------
+# TestComputeAdmissibleSet
+# ---------------------------------------------------------------------------
+
+class TestComputeAdmissibleSet:
+    def test_one_dominated(self):
+        """Action 'c' is dominated by 'a'; 'b' is incomparable."""
+        outcome_sets = {
+            "a": np.array([[5.0, 5.0]]),
+            "b": np.array([[3.0, 6.0]]),
+            "c": np.array([[2.0, 2.0]]),
+        }
+        adm, pairs = compute_admissible_set(["a", "b", "c"], outcome_sets)
+        assert "a" in adm
+        assert "b" in adm
+        assert "c" not in adm
+        assert ("a", "c") in pairs
+
+    def test_single_action(self):
+        """A single action is trivially admissible."""
+        outcome_sets = {"x": np.array([[1.0, 2.0]])}
+        adm, pairs = compute_admissible_set(["x"], outcome_sets)
+        assert adm == ["x"]
+        assert pairs == []
+
+    def test_none_dominated(self):
+        """All actions are mutually incomparable — all survive."""
+        outcome_sets = {
+            "a": np.array([[5.0, 1.0]]),
+            "b": np.array([[1.0, 5.0]]),
+        }
+        adm, pairs = compute_admissible_set(["a", "b"], outcome_sets)
+        assert set(adm) == {"a", "b"}
+        assert pairs == []
+
+
+# ---------------------------------------------------------------------------
+# TestCheckConstraintSatisfaction
+# ---------------------------------------------------------------------------
+
+class TestCheckConstraintSatisfaction:
+    def test_passes_when_all_above_threshold(self):
+        """All outcomes for obj 0 are >= 0.5, so constraint {0: 0.5} passes."""
+        p = _simple_problem(constraints={0: 0.5})
+        # outcomes: a/s1=0.8, a/s2=0.6 — both >= 0.5
+        assert check_constraint_satisfaction("a", p) is True
+
+    def test_fails_when_one_state_below(self):
+        """Action 'b' has obj 0 = 0.4 in state s2, violating threshold 0.5."""
+        p = _simple_problem(constraints={0: 0.5})
+        # outcomes: b/s1=0.5, b/s2=0.4 — s2 fails
+        assert check_constraint_satisfaction("b", p) is False
+
+    def test_zero_prob_state_ignored(self):
+        """State with P[s]=0 is not in supp(P), so violation there is ignored."""
+        p = _simple_problem(
+            constraints={0: 0.5},
+            # s2 has prob 0, so b's 0.4 in s2 won't matter
+            credal_probs=[np.array([1.0, 0.0])],
+        )
+        # b/s1 obj0 = 0.5 >= 0.5 — passes; s2 ignored
+        assert check_constraint_satisfaction("b", p) is True
+
+    def test_no_constraints_always_passes(self):
+        """With empty constraints dict, every action passes."""
+        p = _simple_problem(constraints={})
+        assert check_constraint_satisfaction("a", p) is True
+        assert check_constraint_satisfaction("b", p) is True
+
+
+# ---------------------------------------------------------------------------
+# TestComputeSatisficingSet
+# ---------------------------------------------------------------------------
+
+class TestComputeSatisficingSet:
+    def test_all_above_reference(self):
+        """Both vectors in Y(a) are above r — action satisfices."""
+        outcome_sets = {
+            "a": np.array([[0.5, 0.5], [0.6, 0.6]]),
+            "b": np.array([[0.2, 0.8], [0.6, 0.6]]),
+        }
+        r = np.array([0.4, 0.4])
+        sat = compute_satisficing_set(["a", "b"], outcome_sets, r)
+        assert "a" in sat
+        assert "b" not in sat  # row [0.2, 0.8] fails on dim 0
+
+    def test_single_action_single_vector(self):
+        """Edge case: one action with one outcome vector."""
+        outcome_sets = {"x": np.array([[0.5, 0.5]])}
+        r = np.array([0.5, 0.5])
+        assert compute_satisficing_set(["x"], outcome_sets, r) == ["x"]
+
+    def test_one_vector_below_blocks(self):
+        """One of several vectors is below r — action excluded."""
+        outcome_sets = {
+            "a": np.array([[0.5, 0.5], [0.3, 0.5]]),  # second row fails dim 0
+        }
+        r = np.array([0.4, 0.4])
+        assert compute_satisficing_set(["a"], outcome_sets, r) == []
+
+    def test_empty_feasible_set(self):
+        """Empty input returns empty output."""
+        assert compute_satisficing_set([], {}, np.array([0.5])) == []
+
+
+# ---------------------------------------------------------------------------
+# TestComputeRegretVectors
+# ---------------------------------------------------------------------------
+
+class TestComputeRegretVectors:
+    def test_zero_regret_when_dominant(self):
+        """A single action has zero regret (it's its own benchmark)."""
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        rv = compute_regret_vectors(["a"], oc, p)
+        np.testing.assert_array_equal(rv["a"], np.zeros(2))
+
+    def test_regret_is_nonneg(self):
+        """Regret is always >= 0 when the action is in its own reference set."""
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        rv = compute_regret_vectors(["a", "b"], oc, p)
+        assert np.all(rv["a"] >= 0)
+        assert np.all(rv["b"] >= 0)
+
+    def test_reference_actions_parameter(self):
+        """Supplying a larger reference set can increase regret."""
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        # Regret of "b" computed against only itself => zero
+        rv_self = compute_regret_vectors(["b"], oc, p, reference_actions=["b"])
+        np.testing.assert_array_equal(rv_self["b"], np.zeros(2))
+        # Regret of "b" computed against {"a", "b"} => may be positive
+        rv_both = compute_regret_vectors(["b"], oc, p, reference_actions=["a", "b"])
+        # action "a" has higher obj0 expected values, so regret on obj0 > 0
+        assert rv_both["b"][0] > 0
+
+    def test_hand_computed_regret(self):
+        """Hand-computed regret for a simple 1-prior, 1-evaluator, 2-action case."""
+        # Using _simple_problem defaults: 1 prior [0.5, 0.5], 1 evaluator
+        # E[a] = 0.5*[0.8,0.4] + 0.5*[0.6,0.5] = [0.7, 0.45]
+        # E[b] = 0.5*[0.5,0.7] + 0.5*[0.4,0.8] = [0.45, 0.75]
+        # regret(a) on obj0: max(0.7, 0.45) - 0.7 = 0.0
+        # regret(a) on obj1: max(0.45, 0.75) - 0.45 = 0.3
+        # regret(b) on obj0: max(0.7, 0.45) - 0.45 = 0.25
+        # regret(b) on obj1: max(0.45, 0.75) - 0.75 = 0.0
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        rv = compute_regret_vectors(["a", "b"], oc, p)
+        np.testing.assert_allclose(rv["a"], [0.0, 0.3], atol=1e-10)
+        np.testing.assert_allclose(rv["b"], [0.25, 0.0], atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# TestComputeRegretParetoSet
+# ---------------------------------------------------------------------------
+
+class TestComputeRegretParetoSet:
+    def test_one_dominated(self):
+        """Action 'c' has higher regret on all objectives than 'a'."""
+        regret_vectors = {
+            "a": np.array([0.1, 0.2]),
+            "b": np.array([0.3, 0.05]),
+            "c": np.array([0.5, 0.5]),
+        }
+        rps = compute_regret_pareto_set(["a", "b", "c"], regret_vectors)
+        assert "a" in rps
+        assert "b" in rps
+        assert "c" not in rps
+
+    def test_single_action(self):
+        """A single action is trivially regret-Pareto-optimal."""
+        regret_vectors = {"x": np.array([0.5, 0.5])}
+        rps = compute_regret_pareto_set(["x"], regret_vectors)
+        assert rps == ["x"]
+
+    def test_equal_regret_not_dominated(self):
+        """Two actions with identical regret — neither dominates the other."""
+        regret_vectors = {
+            "a": np.array([0.3, 0.3]),
+            "b": np.array([0.3, 0.3]),
+        }
+        rps = compute_regret_pareto_set(["a", "b"], regret_vectors)
+        assert set(rps) == {"a", "b"}
+
+    def test_all_incomparable(self):
+        """Trade-off in regret — all survive."""
+        regret_vectors = {
+            "a": np.array([0.1, 0.9]),
+            "b": np.array([0.9, 0.1]),
+        }
+        rps = compute_regret_pareto_set(["a", "b"], regret_vectors)
+        assert set(rps) == {"a", "b"}
 
 
 # ---------------------------------------------------------------------------
