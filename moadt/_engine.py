@@ -21,7 +21,7 @@ import numpy as np
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(frozen=True)
 class MOADTProblem:
     """A fully specified MOADT decision problem.
 
@@ -210,7 +210,7 @@ class MOADTProblem:
             )
 
 
-@dataclass
+@dataclass(frozen=True)
 class MOADTResult:
     """Results from running the MOADT protocol.
 

@@ -297,8 +297,13 @@ class TestValidation:
             _simple_problem(actions=[]).validate()
 
     def test_missing_outcome(self):
-        p = _simple_problem()
-        del p.outcomes[("b", "s2")]
+        outcomes = {
+            ("a", "s1"): np.array([0.8, 0.4]),
+            ("a", "s2"): np.array([0.6, 0.5]),
+            ("b", "s1"): np.array([0.5, 0.7]),
+            # ("b", "s2") deliberately omitted
+        }
+        p = _simple_problem(outcomes=outcomes)
         with pytest.raises(ValueError, match="missing outcome"):
             p.validate()
 
