@@ -14,6 +14,7 @@ from moadt import (
     run_moadt_protocol,
     pareto_dominates,
     robustly_dominates,
+    sensitivity_analysis,
 )
 
 
@@ -257,3 +258,30 @@ class TestProtocolInvariants:
         # With no constraints, it passes through all layers
         assert result.constraint_set == ["a0"]
         assert result.regret_pareto_set == ["a0"]
+
+
+# ---------------------------------------------------------------------------
+# Sensitivity Analysis Properties
+# ---------------------------------------------------------------------------
+
+class TestSensitivityAnalysisProperties:
+
+    @given(problem=moadt_problems())
+    @settings(max_examples=50, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow])
+    def test_all_actions_categorized(self, problem):
+        """Every action appears in exactly one of always/sometimes/never."""
+        result = sensitivity_analysis(problem, n_perturbations=10, epsilon=0.05, seed=42)
+        all_cat = set(result.always_survive) | set(result.sometimes_survive) | set(result.never_survive)
+        assert all_cat == set(problem.actions)
+
+    @given(problem=moadt_problems())
+    @settings(max_examples=50, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow])
+    def test_survival_counts_bounded(self, problem):
+        """Survival counts are between 0 and n_perturbations."""
+        n = 10
+        result = sensitivity_analysis(problem, n_perturbations=n, epsilon=0.05, seed=0)
+        for a in problem.actions:
+            for layer, count in result.layer_survival_counts[a].items():
+                assert 0 <= count <= n

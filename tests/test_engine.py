@@ -6,6 +6,7 @@ import pytest
 import moadt
 from moadt import (
     MOADTProblem,
+    SensitivityResult,
     compute_outcome_sets,
     pareto_dominates,
     robustly_dominates,
@@ -17,6 +18,7 @@ from moadt import (
     compute_regret_pareto_set,
     run_moadt_protocol,
     scalar_eu_analysis,
+    sensitivity_analysis,
 )
 
 
@@ -903,3 +905,116 @@ class TestFromArrays:
                 constraints={"nonexistent": 0.5},
                 reference_point=np.array([0.3, 0.3]),
             )
+
+
+# ---------------------------------------------------------------------------
+# TestSensitivityAnalysis
+# ---------------------------------------------------------------------------
+
+class TestSensitivityAnalysis:
+    def test_returns_sensitivity_result(self):
+        """sensitivity_analysis returns a SensitivityResult."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=10, epsilon=0.01)
+        assert isinstance(result, SensitivityResult)
+
+    def test_n_perturbations_matches(self):
+        """Number of results matches n_perturbations."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=20, epsilon=0.01)
+        assert result.n_perturbations == 20
+        assert len(result.results) == 20
+
+    def test_epsilon_stored(self):
+        """Epsilon is stored in the result."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=5, epsilon=0.03)
+        assert result.epsilon == 0.03
+
+    def test_all_actions_categorized(self):
+        """Every action appears in exactly one of always/sometimes/never."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=30, epsilon=0.05, seed=42)
+        all_categorized = set(result.always_survive) | set(result.sometimes_survive) | set(result.never_survive)
+        assert all_categorized == set(problem.actions)
+        # No overlaps
+        assert not (set(result.always_survive) & set(result.sometimes_survive))
+        assert not (set(result.always_survive) & set(result.never_survive))
+        assert not (set(result.sometimes_survive) & set(result.never_survive))
+
+    def test_survival_frequencies_valid(self):
+        """Frequencies are in [0, 1] for all actions."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=20, epsilon=0.05, seed=0)
+        for a in problem.actions:
+            assert 0.0 <= result.survival_frequencies[a] <= 1.0
+
+    def test_layer_survival_counts_keys(self):
+        """Layer survival counts have correct structure."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=10, epsilon=0.01)
+        for a in problem.actions:
+            assert a in result.layer_survival_counts
+            counts = result.layer_survival_counts[a]
+            assert set(counts.keys()) == {"constraint", "feasible", "satisficing", "regret_pareto"}
+
+    def test_layer_survival_counts_monotonic(self):
+        """Per-action survival counts are non-increasing across layers."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=30, epsilon=0.05, seed=7)
+        for a in problem.actions:
+            c = result.layer_survival_counts[a]
+            assert c["constraint"] >= c["feasible"]
+            assert c["feasible"] >= c["satisficing"]
+            assert c["satisficing"] >= c["regret_pareto"]
+
+    def test_layer_fragility_keys(self):
+        """Layer fragility has the four expected transition keys."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=10, epsilon=0.01)
+        expected_keys = {
+            "all -> constraint",
+            "constraint -> feasible",
+            "feasible -> satisficing",
+            "satisficing -> regret_pareto",
+        }
+        assert set(result.layer_fragility.keys()) == expected_keys
+
+    def test_layer_fragility_non_negative(self):
+        """Fragility scores (std dev) are non-negative."""
+        problem = _simple_problem()
+        result = sensitivity_analysis(problem, n_perturbations=10, epsilon=0.01)
+        for score in result.layer_fragility.values():
+            assert score >= 0.0
+
+    def test_seed_reproducibility(self):
+        """Same seed produces identical results."""
+        problem = _simple_problem()
+        r1 = sensitivity_analysis(problem, n_perturbations=20, epsilon=0.05, seed=123)
+        r2 = sensitivity_analysis(problem, n_perturbations=20, epsilon=0.05, seed=123)
+        assert r1.survival_frequencies == r2.survival_frequencies
+        assert r1.always_survive == r2.always_survive
+
+    def test_zero_epsilon_preserves_original(self):
+        """With epsilon=0, all perturbed runs should match the original."""
+        problem = _simple_problem()
+        baseline = run_moadt_protocol(problem)
+        result = sensitivity_analysis(problem, n_perturbations=10, epsilon=0.0)
+        # Every run should produce the same regret_pareto_set as the baseline
+        for r in result.results:
+            assert r.regret_pareto_set == baseline.regret_pareto_set
+
+    def test_single_action_always_survives(self):
+        """A single-action problem: the action always survives."""
+        problem = MOADTProblem(
+            actions=["only"],
+            states=["s1"],
+            objectives=["o1"],
+            outcomes={("only", "s1"): np.array([0.5])},
+            credal_probs=[np.array([1.0])],
+            constraints={},
+            reference_point=np.array([0.3]),
+        )
+        result = sensitivity_analysis(problem, n_perturbations=20, epsilon=0.05, seed=0)
+        assert result.always_survive == ["only"]
+        assert result.never_survive == []

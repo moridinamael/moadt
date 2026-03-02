@@ -10,6 +10,7 @@ except PackageNotFoundError:
 from moadt._engine import (
     MOADTProblem,
     MOADTResult,
+    SensitivityResult,
     compute_outcome_sets,
     pareto_dominates,
     robustly_dominates,
@@ -22,12 +23,14 @@ from moadt._engine import (
     run_moadt_protocol,
     scalar_eu_analysis,
     print_trace,
+    sensitivity_analysis,
 )
 
 __all__ = [
     "__version__",
     "MOADTProblem",
     "MOADTResult",
+    "SensitivityResult",
     "compute_outcome_sets",
     "pareto_dominates",
     "robustly_dominates",
@@ -40,4 +43,5 @@ __all__ = [
     "run_moadt_protocol",
     "scalar_eu_analysis",
     "print_trace",
+    "sensitivity_analysis",
 ]

@@ -246,6 +246,81 @@ class MOADTResult:
     layer_trace: list[str]                      # Human-readable trace of protocol
 
 
+@dataclass(frozen=True)
+class SensitivityResult:
+    """Results from sensitivity analysis over perturbed problem variants.
+
+    Attributes:
+        n_perturbations: Number of perturbed runs.
+        epsilon: Perturbation magnitude.
+        survival_frequencies: Per-action fraction of runs where the action
+            appears in the final ``regret_pareto_set``.
+        always_survive: Actions in ``regret_pareto_set`` in every run.
+        sometimes_survive: Actions in ``regret_pareto_set`` in some but not all runs.
+        never_survive: Actions never in ``regret_pareto_set``.
+        layer_survival_counts: Per-action counts at each protocol layer.
+            Keys: action labels. Values: dict with keys
+            ``"constraint"``, ``"feasible"``, ``"satisficing"``,
+            ``"regret_pareto"`` mapping to integer counts.
+        layer_fragility: Per-transition fragility score (standard deviation
+            of the fraction of actions eliminated at each transition, across
+            all perturbation runs). Higher values indicate more sensitivity.
+            Keys: ``"all -> constraint"``, ``"constraint -> feasible"``,
+            ``"feasible -> satisficing"``, ``"satisficing -> regret_pareto"``.
+        results: All individual ``MOADTResult`` objects.
+    """
+
+    n_perturbations: int
+    epsilon: float
+    survival_frequencies: dict[str, float]
+    always_survive: list[str]
+    sometimes_survive: list[str]
+    never_survive: list[str]
+    layer_survival_counts: dict[str, dict[str, int]]
+    layer_fragility: dict[str, float]
+    results: list[MOADTResult]
+
+
+def _perturb_problem(
+    problem: MOADTProblem,
+    epsilon: float,
+    rng: np.random.Generator,
+) -> MOADTProblem:
+    """Create a perturbed variant of *problem*."""
+    # Perturb credal probabilities: add noise, clip, renormalize
+    new_credal = []
+    for P in problem.credal_probs:
+        noise = rng.uniform(-epsilon, epsilon, size=P.shape)
+        perturbed = P + noise
+        perturbed = np.maximum(perturbed, 0.0)
+        total = perturbed.sum()
+        if total > 0:
+            perturbed = perturbed / total
+        else:
+            perturbed = P.copy()  # fallback: keep original
+        new_credal.append(perturbed)
+
+    # Perturb constraint thresholds
+    new_constraints = {}
+    for idx, threshold in problem.constraints.items():
+        new_constraints[idx] = threshold + rng.uniform(-epsilon, epsilon)
+
+    # Perturb reference point
+    noise = rng.uniform(-epsilon, epsilon, size=problem.reference_point.shape)
+    new_reference = problem.reference_point + noise
+
+    return MOADTProblem(
+        actions=problem.actions,
+        states=problem.states,
+        objectives=problem.objectives,
+        outcomes=problem.outcomes,
+        credal_probs=new_credal,
+        constraints=new_constraints,
+        reference_point=new_reference,
+        sigma=problem.sigma,
+    )
+
+
 def compute_outcome_sets(problem: MOADTProblem) -> dict[str, np.ndarray]:
     """Compute the outcome set Y(a) for every action.
 
@@ -636,3 +711,137 @@ def print_trace(result: MOADTResult) -> None:
     """Print the human-readable protocol trace to stdout."""
     for line in result.layer_trace:
         print(line)
+
+
+def sensitivity_analysis(
+    problem: MOADTProblem,
+    n_perturbations: int = 50,
+    epsilon: float = 0.05,
+    seed: int | None = None,
+) -> SensitivityResult:
+    """Run sensitivity analysis over perturbed problem variants.
+
+    Generates *n_perturbations* variants of *problem* by jittering credal
+    probabilities, constraint thresholds, and the reference point within
+    *epsilon*, runs :func:`run_moadt_protocol` on each, and summarises
+    which actions always, sometimes, or never survive.
+
+    Args:
+        problem: The baseline decision problem.
+        n_perturbations: Number of perturbed runs (default 50).
+        epsilon: Maximum absolute perturbation magnitude (default 0.05).
+        seed: Optional RNG seed for reproducibility.
+
+    Returns:
+        A :class:`SensitivityResult` with survival frequencies,
+        layer-by-layer counts, and fragility scores.
+    """
+    rng = np.random.default_rng(seed)
+    actions = problem.actions
+    n_actions = len(actions)
+
+    # Guard against n_perturbations=0
+    if n_perturbations == 0:
+        layer_counts = {
+            a: {"constraint": 0, "feasible": 0, "satisficing": 0, "regret_pareto": 0}
+            for a in actions
+        }
+        return SensitivityResult(
+            n_perturbations=0,
+            epsilon=epsilon,
+            survival_frequencies={a: 0.0 for a in actions},
+            always_survive=[],
+            sometimes_survive=[],
+            never_survive=list(actions),
+            layer_survival_counts=layer_counts,
+            layer_fragility={
+                "all -> constraint": 0.0,
+                "constraint -> feasible": 0.0,
+                "feasible -> satisficing": 0.0,
+                "satisficing -> regret_pareto": 0.0,
+            },
+            results=[],
+        )
+
+    # Accumulators
+    results: list[MOADTResult] = []
+    layer_counts: dict[str, dict[str, int]] = {
+        a: {"constraint": 0, "feasible": 0, "satisficing": 0, "regret_pareto": 0}
+        for a in actions
+    }
+    # For fragility: track set sizes at each layer per run
+    constraint_sizes: list[int] = []
+    feasible_sizes: list[int] = []
+    satisficing_sizes: list[int] = []
+    regret_pareto_sizes: list[int] = []
+
+    for _ in range(n_perturbations):
+        perturbed = _perturb_problem(problem, epsilon, rng)
+        result = run_moadt_protocol(perturbed)
+        results.append(result)
+
+        # Track per-action layer survival
+        for a in actions:
+            if a in result.constraint_set:
+                layer_counts[a]["constraint"] += 1
+            if a in result.feasible_set:
+                layer_counts[a]["feasible"] += 1
+            if a in result.satisficing_set or (
+                result.asf_selection is not None and a in result.asf_selection
+            ):
+                layer_counts[a]["satisficing"] += 1
+            if a in result.regret_pareto_set:
+                layer_counts[a]["regret_pareto"] += 1
+
+        # Track set sizes for fragility
+        constraint_sizes.append(len(result.constraint_set))
+        feasible_sizes.append(len(result.feasible_set))
+        working = (
+            result.asf_selection
+            if result.sat_fallback_used and result.asf_selection is not None
+            else result.satisficing_set
+        )
+        satisficing_sizes.append(len(working))
+        regret_pareto_sizes.append(len(result.regret_pareto_set))
+
+    # Compute survival frequencies (final layer)
+    survival_freq = {
+        a: layer_counts[a]["regret_pareto"] / n_perturbations for a in actions
+    }
+
+    # Categorize
+    always = [a for a in actions if survival_freq[a] == 1.0]
+    sometimes = [a for a in actions if 0.0 < survival_freq[a] < 1.0]
+    never = [a for a in actions if survival_freq[a] == 0.0]
+
+    # Compute layer fragility: std of the fraction eliminated at each transition
+    def _fragility(input_sizes: list[int], output_sizes: list[int]) -> float:
+        """Std of the drop-fraction across runs."""
+        fracs = []
+        for inp, out in zip(input_sizes, output_sizes):
+            if inp > 0:
+                fracs.append(1.0 - out / inp)
+            else:
+                fracs.append(0.0)
+        arr = np.array(fracs)
+        return float(arr.std())
+
+    all_sizes = [n_actions] * n_perturbations
+    layer_fragility = {
+        "all -> constraint": _fragility(all_sizes, constraint_sizes),
+        "constraint -> feasible": _fragility(constraint_sizes, feasible_sizes),
+        "feasible -> satisficing": _fragility(feasible_sizes, satisficing_sizes),
+        "satisficing -> regret_pareto": _fragility(satisficing_sizes, regret_pareto_sizes),
+    }
+
+    return SensitivityResult(
+        n_perturbations=n_perturbations,
+        epsilon=epsilon,
+        survival_frequencies=survival_freq,
+        always_survive=always,
+        sometimes_survive=sometimes,
+        never_survive=never,
+        layer_survival_counts=layer_counts,
+        layer_fragility=layer_fragility,
+        results=results,
+    )
