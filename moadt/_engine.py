@@ -326,29 +326,41 @@ def compute_outcome_sets(problem: MOADTProblem) -> dict[str, np.ndarray]:
 
     Y(a) = { E_P[f(omega(a, s))] : P in P, f in F }
 
+    Uses vectorized numpy operations: builds a 4-D outcome tensor of shape
+    ``(n_actions, n_states, n_evaluators, n_objectives)`` and contracts it
+    with the ``(n_priors, n_states)`` credal probability matrix via
+    ``np.einsum``.
+
     Returns:
         Mapping from action label to an array of shape
         ``(|P| * n_evaluators, n_objectives)``.
     """
+    n_actions = len(problem.actions)
+    n_states = len(problem.states)
     n_eval = problem.n_evaluators
     k = problem.n_objectives
 
+    # -- Build 4-D outcome tensor (n_actions, n_states, n_evaluators, n_objectives)
+    outcome_tensor = np.empty((n_actions, n_states, n_eval, k))
+    for i, a in enumerate(problem.actions):
+        for j, s in enumerate(problem.states):
+            outcome = problem.outcomes[(a, s)]
+            if outcome.ndim == 1:
+                outcome_tensor[i, j, 0] = outcome
+            else:
+                outcome_tensor[i, j] = outcome
+
+    # -- Stack credal probs into (n_priors, n_states) matrix
+    P_matrix = np.asarray(problem.credal_probs)  # (n_priors, n_states)
+
+    # -- Vectorized expected value: contract over states axis
+    # result shape: (n_actions, n_priors, n_evaluators, n_objectives)
+    all_expected = np.einsum('ps,asfk->apfk', P_matrix, outcome_tensor)
+
+    # -- Reshape to dict[str, ndarray] with (n_priors * n_evaluators, n_objectives) per action
     outcome_sets = {}
-    for a in problem.actions:
-        vectors = []
-        for P in problem.credal_probs:
-            for f_idx in range(n_eval):
-                # Compute E_P[f(omega(a, s))] for this (P, f) pair
-                expected = np.zeros(k)
-                for s_idx, s in enumerate(problem.states):
-                    outcome = problem.outcomes[(a, s)]
-                    if outcome.ndim > 1:
-                        eval_vector = outcome[f_idx]
-                    else:
-                        eval_vector = outcome
-                    expected += P[s_idx] * eval_vector
-                vectors.append(expected)
-        outcome_sets[a] = np.array(vectors)
+    for i, a in enumerate(problem.actions):
+        outcome_sets[a] = all_expected[i].reshape(-1, k)
     return outcome_sets
 
 

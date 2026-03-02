@@ -64,6 +64,28 @@ def _simple_problem(**overrides):
     return MOADTProblem(**defaults)
 
 
+def _compute_outcome_sets_loop(problem):
+    """Reference loop-based implementation for regression testing."""
+    n_eval = problem.n_evaluators
+    k = problem.n_objectives
+    outcome_sets = {}
+    for a in problem.actions:
+        vectors = []
+        for P in problem.credal_probs:
+            for f_idx in range(n_eval):
+                expected = np.zeros(k)
+                for s_idx, s in enumerate(problem.states):
+                    outcome = problem.outcomes[(a, s)]
+                    if outcome.ndim > 1:
+                        eval_vector = outcome[f_idx]
+                    else:
+                        eval_vector = outcome
+                    expected += P[s_idx] * eval_vector
+                vectors.append(expected)
+        outcome_sets[a] = np.array(vectors)
+    return outcome_sets
+
+
 # ---------------------------------------------------------------------------
 # TestParetoDominates
 # ---------------------------------------------------------------------------
@@ -743,6 +765,104 @@ class TestComputeAsfDefaultSigma:
         val_default = compute_asf("a", oc, p.reference_point)
         val_explicit = compute_asf("a", oc, p.reference_point, np.ones(2))
         assert val_default == val_explicit
+
+
+# ---------------------------------------------------------------------------
+# TestComputeOutcomeSetsVectorized — regression: vectorized matches loop
+# ---------------------------------------------------------------------------
+
+class TestComputeOutcomeSetsVectorized:
+    """Regression: vectorized compute_outcome_sets matches loop-based reference."""
+
+    def test_simple_single_evaluator(self):
+        """Single evaluator, 1 prior, 2 actions, 2 states."""
+        p = _simple_problem()
+        got = compute_outcome_sets(p)
+        ref = _compute_outcome_sets_loop(p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-14)
+
+    def test_simple_multi_prior(self):
+        """Single evaluator, multiple priors."""
+        p = _simple_problem(
+            credal_probs=[np.array([0.3, 0.7]), np.array([0.8, 0.2])]
+        )
+        got = compute_outcome_sets(p)
+        ref = _compute_outcome_sets_loop(p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-14)
+
+    def test_multi_evaluator(self):
+        """Two evaluators, single prior."""
+        outcomes = {
+            ("a", "s1"): np.array([[0.8, 0.4], [0.7, 0.3]]),
+            ("a", "s2"): np.array([[0.6, 0.5], [0.5, 0.4]]),
+            ("b", "s1"): np.array([[0.5, 0.7], [0.4, 0.6]]),
+            ("b", "s2"): np.array([[0.4, 0.8], [0.3, 0.7]]),
+        }
+        p = _simple_problem(outcomes=outcomes)
+        got = compute_outcome_sets(p)
+        ref = _compute_outcome_sets_loop(p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-14)
+
+    def test_ellsberg_scale(self):
+        """Ellsberg-scale problem: 7 states, 5 priors, 2 evaluators."""
+        state_black_counts = [0, 10, 20, 30, 40, 50, 60]
+        states = [f"s_{b}B_{60-b}Y" for b in state_black_counts]
+        action_labels = ["Bet_I_Red", "Bet_II_Black"]
+        outcomes = {}
+        for b in state_black_counts:
+            s = f"s_{b}B_{60-b}Y"
+            p_red = 30 / 90
+            p_black = b / 90
+            p_yellow = (60 - b) / 90
+            p_win = {"Bet_I_Red": p_red, "Bet_II_Black": p_black}
+            know_unknown = 1.0 - abs(b - 30) / 30.0
+            know = {"Bet_I_Red": 1.0, "Bet_II_Black": know_unknown}
+            for a in action_labels:
+                neutral = np.array([p_win[a], know[a]])
+                cautious = np.array([np.sqrt(p_win[a]), know[a]])
+                outcomes[(a, s)] = np.array([neutral, cautious])
+        P_uniform = np.ones(7) / 7
+        P_extreme = np.array([0.30, 0.05, 0.03, 0.04, 0.03, 0.05, 0.30])
+        P_extreme /= P_extreme.sum()
+        P_black_heavy = np.array([0.02, 0.05, 0.08, 0.15, 0.25, 0.25, 0.20])
+        P_black_heavy /= P_black_heavy.sum()
+        P_yellow_heavy = np.array([0.20, 0.25, 0.25, 0.15, 0.08, 0.05, 0.02])
+        P_yellow_heavy /= P_yellow_heavy.sum()
+        P_moderate = np.array([0.02, 0.08, 0.20, 0.40, 0.20, 0.08, 0.02])
+        P_moderate /= P_moderate.sum()
+        p = MOADTProblem(
+            actions=action_labels, states=states,
+            objectives=["monetary_payoff", "knowability"],
+            outcomes=outcomes,
+            credal_probs=[P_uniform, P_extreme, P_black_heavy, P_yellow_heavy, P_moderate],
+            constraints={}, reference_point=np.array([0.25, 0.50]),
+        )
+        got = compute_outcome_sets(p)
+        ref = _compute_outcome_sets_loop(p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-12)
+            assert got[a].shape == (10, 2)  # 5 priors * 2 evaluators, 2 objectives
+
+    def test_output_shapes(self):
+        """Verify shapes match expectations for various configurations."""
+        p = _simple_problem(
+            credal_probs=[np.array([0.3, 0.7]), np.array([0.5, 0.5]), np.array([0.9, 0.1])]
+        )
+        oc = compute_outcome_sets(p)
+        for a in p.actions:
+            assert oc[a].shape == (3, 2)  # 3 priors * 1 eval, 2 objectives
+
+    def test_hand_computed_values(self):
+        """Verify against hand-computed expected values from _simple_problem."""
+        p = _simple_problem()  # 1 prior [0.5, 0.5], 1 evaluator
+        oc = compute_outcome_sets(p)
+        # E[a] = 0.5*[0.8,0.4] + 0.5*[0.6,0.5] = [0.7, 0.45]
+        np.testing.assert_allclose(oc["a"], [[0.7, 0.45]], atol=1e-14)
+        # E[b] = 0.5*[0.5,0.7] + 0.5*[0.4,0.8] = [0.45, 0.75]
+        np.testing.assert_allclose(oc["b"], [[0.45, 0.75]], atol=1e-14)
 
 
 # ---------------------------------------------------------------------------

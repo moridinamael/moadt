@@ -12,6 +12,7 @@ import hypothesis.extra.numpy as hnp
 from moadt import (
     MOADTProblem,
     run_moadt_protocol,
+    compute_outcome_sets,
     pareto_dominates,
     robustly_dominates,
     sensitivity_analysis,
@@ -198,6 +199,45 @@ class TestRobustlyDominatesProperties:
     def test_irreflexive(self, Y):
         """robustly_dominates(Y, Y) is always False."""
         assert not robustly_dominates(Y, Y)
+
+
+# ---------------------------------------------------------------------------
+# Property 8: Vectorized compute_outcome_sets matches loop reference
+# ---------------------------------------------------------------------------
+
+def _compute_outcome_sets_loop(problem):
+    """Reference loop-based implementation for regression testing."""
+    n_eval = problem.n_evaluators
+    k = problem.n_objectives
+    outcome_sets = {}
+    for a in problem.actions:
+        vectors = []
+        for P in problem.credal_probs:
+            for f_idx in range(n_eval):
+                expected = np.zeros(k)
+                for s_idx, s in enumerate(problem.states):
+                    outcome = problem.outcomes[(a, s)]
+                    if outcome.ndim > 1:
+                        eval_vector = outcome[f_idx]
+                    else:
+                        eval_vector = outcome
+                    expected += P[s_idx] * eval_vector
+                vectors.append(expected)
+        outcome_sets[a] = np.array(vectors)
+    return outcome_sets
+
+
+class TestComputeOutcomeSetsProperties:
+
+    @given(problem=moadt_problems())
+    @settings(max_examples=200, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow])
+    def test_vectorized_matches_loop(self, problem):
+        """Vectorized compute_outcome_sets matches loop-based reference on random problems."""
+        got = compute_outcome_sets(problem)
+        ref = _compute_outcome_sets_loop(problem)
+        for a in problem.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-12)
 
 
 # ---------------------------------------------------------------------------
