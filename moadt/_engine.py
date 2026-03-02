@@ -499,37 +499,27 @@ def compute_regret_vectors(
     Returns:
         Mapping from action label to its regret vector of shape
         ``(n_objectives,)``.
+
+    Uses vectorized numpy operations: stacks reference-action outcome sets
+    into a matrix, computes column-wise maxima, and broadcasts the gap
+    computation across all (prior, evaluator) pairs.
     """
     if reference_actions is None:
         reference_actions = actions
 
-    k = problem.n_objectives
-    n_eval = problem.n_evaluators
+    # Stack reference-action outcome sets into (n_ref, n_pf, k) tensor
+    ref_matrix = np.stack([outcome_sets[a_prime] for a_prime in reference_actions])
+
+    # Column-wise max over reference actions for each (P,f) pair
+    # best_by_pf shape: (n_pf_pairs, n_objectives)
+    best_by_pf = ref_matrix.max(axis=0)
 
     regret_vectors = {}
-
     for a in actions:
-        regret = np.zeros(k)
-
-        # For each (P, f) pair, compute the regret of a on each objective
-        pf_idx = 0
-        for p_idx, P in enumerate(problem.credal_probs):
-            for f_idx in range(n_eval):
-                # E_P[f_i(a)] for this (P, f)
-                expected_a = outcome_sets[a][pf_idx]
-
-                # max_{a' in reference set} E_P[f_i(a')] for this (P, f)
-                for obj_i in range(k):
-                    best_val = max(
-                        outcome_sets[a_prime][pf_idx][obj_i]
-                        for a_prime in reference_actions
-                    )
-                    gap = best_val - expected_a[obj_i]
-                    regret[obj_i] = max(regret[obj_i], gap)
-
-                pf_idx += 1
-
-        regret_vectors[a] = regret
+        # gap shape: (n_pf_pairs, n_objectives)
+        gap = best_by_pf - outcome_sets[a]
+        # max over all (P,f) pairs per objective
+        regret_vectors[a] = gap.max(axis=0)
 
     return regret_vectors
 

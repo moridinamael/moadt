@@ -86,6 +86,31 @@ def _compute_outcome_sets_loop(problem):
     return outcome_sets
 
 
+def _compute_regret_vectors_loop(actions, outcome_sets, problem, reference_actions=None):
+    """Reference loop-based implementation for regression testing."""
+    if reference_actions is None:
+        reference_actions = actions
+    k = problem.n_objectives
+    n_eval = problem.n_evaluators
+    regret_vectors = {}
+    for a in actions:
+        regret = np.zeros(k)
+        pf_idx = 0
+        for p_idx, P in enumerate(problem.credal_probs):
+            for f_idx in range(n_eval):
+                expected_a = outcome_sets[a][pf_idx]
+                for obj_i in range(k):
+                    best_val = max(
+                        outcome_sets[a_prime][pf_idx][obj_i]
+                        for a_prime in reference_actions
+                    )
+                    gap = best_val - expected_a[obj_i]
+                    regret[obj_i] = max(regret[obj_i], gap)
+                pf_idx += 1
+        regret_vectors[a] = regret
+    return regret_vectors
+
+
 # ---------------------------------------------------------------------------
 # TestParetoDominates
 # ---------------------------------------------------------------------------
@@ -863,6 +888,104 @@ class TestComputeOutcomeSetsVectorized:
         np.testing.assert_allclose(oc["a"], [[0.7, 0.45]], atol=1e-14)
         # E[b] = 0.5*[0.5,0.7] + 0.5*[0.4,0.8] = [0.45, 0.75]
         np.testing.assert_allclose(oc["b"], [[0.45, 0.75]], atol=1e-14)
+
+
+# ---------------------------------------------------------------------------
+# TestComputeRegretVectorsVectorized
+# ---------------------------------------------------------------------------
+
+class TestComputeRegretVectorsVectorized:
+    """Regression: vectorized compute_regret_vectors matches loop-based reference."""
+
+    def test_simple_single_evaluator(self):
+        """Single evaluator, 1 prior, 2 actions."""
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        got = compute_regret_vectors(["a", "b"], oc, p)
+        ref = _compute_regret_vectors_loop(["a", "b"], oc, p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-14)
+
+    def test_simple_multi_prior(self):
+        """Single evaluator, multiple priors."""
+        p = _simple_problem(
+            credal_probs=[np.array([0.3, 0.7]), np.array([0.8, 0.2])]
+        )
+        oc = compute_outcome_sets(p)
+        got = compute_regret_vectors(["a", "b"], oc, p)
+        ref = _compute_regret_vectors_loop(["a", "b"], oc, p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-14)
+
+    def test_multi_evaluator(self):
+        """Two evaluators, single prior."""
+        outcomes = {
+            ("a", "s1"): np.array([[0.8, 0.4], [0.7, 0.3]]),
+            ("a", "s2"): np.array([[0.6, 0.5], [0.5, 0.4]]),
+            ("b", "s1"): np.array([[0.5, 0.7], [0.4, 0.6]]),
+            ("b", "s2"): np.array([[0.4, 0.8], [0.3, 0.7]]),
+        }
+        p = _simple_problem(outcomes=outcomes)
+        oc = compute_outcome_sets(p)
+        got = compute_regret_vectors(["a", "b"], oc, p)
+        ref = _compute_regret_vectors_loop(["a", "b"], oc, p)
+        for a in p.actions:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-14)
+
+    def test_reference_actions_subset(self):
+        """Reference set differs from actions being evaluated."""
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        got = compute_regret_vectors(["b"], oc, p, reference_actions=["a", "b"])
+        ref = _compute_regret_vectors_loop(["b"], oc, p, reference_actions=["a", "b"])
+        np.testing.assert_allclose(got["b"], ref["b"], atol=1e-14)
+
+    def test_single_action_zero_regret(self):
+        """Single action with self-reference has zero regret."""
+        p = _simple_problem()
+        oc = compute_outcome_sets(p)
+        got = compute_regret_vectors(["a"], oc, p)
+        np.testing.assert_array_equal(got["a"], np.zeros(2))
+
+    def test_ellsberg_scale(self):
+        """Ellsberg-scale: 7 states, 5 priors, 2 evaluators, 2 actions."""
+        state_black_counts = [0, 10, 20, 30, 40, 50, 60]
+        states = [f"s_{b}B_{60-b}Y" for b in state_black_counts]
+        action_labels = ["Bet_I_Red", "Bet_II_Black"]
+        outcomes = {}
+        for b in state_black_counts:
+            s = f"s_{b}B_{60-b}Y"
+            p_red = 30 / 90
+            p_black = b / 90
+            p_yellow = (60 - b) / 90
+            p_win = {"Bet_I_Red": p_red, "Bet_II_Black": p_black}
+            know_unknown = 1.0 - abs(b - 30) / 30.0
+            know = {"Bet_I_Red": 1.0, "Bet_II_Black": know_unknown}
+            for a in action_labels:
+                neutral = np.array([p_win[a], know[a]])
+                cautious = np.array([np.sqrt(p_win[a]), know[a]])
+                outcomes[(a, s)] = np.array([neutral, cautious])
+        P_uniform = np.ones(7) / 7
+        P_extreme = np.array([0.30, 0.05, 0.03, 0.04, 0.03, 0.05, 0.30])
+        P_extreme /= P_extreme.sum()
+        P_black_heavy = np.array([0.02, 0.05, 0.08, 0.15, 0.25, 0.25, 0.20])
+        P_black_heavy /= P_black_heavy.sum()
+        P_yellow_heavy = np.array([0.20, 0.25, 0.25, 0.15, 0.08, 0.05, 0.02])
+        P_yellow_heavy /= P_yellow_heavy.sum()
+        P_moderate = np.array([0.02, 0.08, 0.20, 0.40, 0.20, 0.08, 0.02])
+        P_moderate /= P_moderate.sum()
+        p = MOADTProblem(
+            actions=action_labels, states=states,
+            objectives=["monetary_payoff", "knowability"],
+            outcomes=outcomes,
+            credal_probs=[P_uniform, P_extreme, P_black_heavy, P_yellow_heavy, P_moderate],
+            constraints={}, reference_point=np.array([0.25, 0.50]),
+        )
+        oc = compute_outcome_sets(p)
+        got = compute_regret_vectors(action_labels, oc, p)
+        ref = _compute_regret_vectors_loop(action_labels, oc, p)
+        for a in action_labels:
+            np.testing.assert_allclose(got[a], ref[a], atol=1e-12)
 
 
 # ---------------------------------------------------------------------------
