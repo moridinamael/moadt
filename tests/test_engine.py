@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+import moadt
 from moadt import (
     MOADTProblem,
     compute_outcome_sets,
@@ -17,6 +18,24 @@ from moadt import (
     run_moadt_protocol,
     scalar_eu_analysis,
 )
+
+
+# ---------------------------------------------------------------------------
+# TestVersion
+# ---------------------------------------------------------------------------
+
+class TestVersion:
+    def test_version_is_string(self):
+        assert isinstance(moadt.__version__, str)
+
+    def test_version_is_pep440(self):
+        """Basic check: version looks like X.Y.Z."""
+        parts = moadt.__version__.split(".")
+        assert len(parts) >= 2
+        assert all(p.isdigit() for p in parts[:2])
+
+    def test_version_in_all(self):
+        assert "__version__" in moadt.__all__
 
 
 # ---------------------------------------------------------------------------

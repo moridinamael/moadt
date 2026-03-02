@@ -1,5 +1,12 @@
 """moadt -- Multi-Objective Admissible Decision Theory."""
 
+from importlib.metadata import PackageNotFoundError, version as _meta_version
+
+try:
+    __version__: str = _meta_version("moadt")
+except PackageNotFoundError:
+    __version__ = "0.1.0"
+
 from moadt._engine import (
     MOADTProblem,
     MOADTResult,
@@ -18,6 +25,7 @@ from moadt._engine import (
 )
 
 __all__ = [
+    "__version__",
     "MOADTProblem",
     "MOADTResult",
     "compute_outcome_sets",
