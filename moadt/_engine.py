@@ -179,6 +179,14 @@ class MOADTProblem:
                     f"expected {expected_shape}, got {arr.shape}"
                 )
 
+        # Outcome columns must match number of objectives
+        n_cols = expected_shape[-1]
+        if n_cols != k:
+            raise ValueError(
+                f"outcome arrays have {n_cols} columns, "
+                f"expected {k} (one per objective)"
+            )
+
         # Credal probs
         if not self.credal_probs:
             raise ValueError("credal_probs must be non-empty")

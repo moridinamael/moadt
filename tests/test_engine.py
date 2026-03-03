@@ -387,6 +387,42 @@ class TestValidation:
         with pytest.raises(ValueError, match="reference_point length"):
             _simple_problem(reference_point=np.array([0.3])).validate()
 
+    def test_outcome_columns_mismatch_single_evaluator(self):
+        """Outcomes have 3 columns but only 2 objectives declared."""
+        outcomes = {
+            ("a", "s1"): np.array([0.8, 0.4, 0.1]),
+            ("a", "s2"): np.array([0.6, 0.5, 0.2]),
+            ("b", "s1"): np.array([0.5, 0.7, 0.3]),
+            ("b", "s2"): np.array([0.4, 0.8, 0.4]),
+        }
+        p = _simple_problem(outcomes=outcomes)
+        with pytest.raises(ValueError, match="columns"):
+            p.validate()
+
+    def test_outcome_columns_mismatch_multi_evaluator(self):
+        """Multi-evaluator outcomes have 3 columns but only 2 objectives."""
+        outcomes = {
+            ("a", "s1"): np.array([[0.8, 0.4, 0.1], [0.7, 0.3, 0.2]]),
+            ("a", "s2"): np.array([[0.6, 0.5, 0.2], [0.5, 0.4, 0.3]]),
+            ("b", "s1"): np.array([[0.5, 0.7, 0.3], [0.4, 0.6, 0.4]]),
+            ("b", "s2"): np.array([[0.4, 0.8, 0.4], [0.3, 0.7, 0.5]]),
+        }
+        p = _simple_problem(outcomes=outcomes)
+        with pytest.raises(ValueError, match="columns"):
+            p.validate()
+
+    def test_outcome_columns_fewer_than_objectives(self):
+        """Outcomes have 1 column but 2 objectives declared."""
+        outcomes = {
+            ("a", "s1"): np.array([0.8]),
+            ("a", "s2"): np.array([0.6]),
+            ("b", "s1"): np.array([0.5]),
+            ("b", "s2"): np.array([0.4]),
+        }
+        p = _simple_problem(outcomes=outcomes)
+        with pytest.raises(ValueError, match="columns"):
+            p.validate()
+
 
 # ---------------------------------------------------------------------------
 # TestNEvaluators
